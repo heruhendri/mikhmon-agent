@@ -15,7 +15,7 @@ Script ini:
 ## **Cara pakai:**
 
 ```
-wget -O install-mikhmon-agent.sh https://raw.githubusercontent.com/heruhendri/mikhmon-agent/main/install-mikhmon-agent.sh
+wget -O install-mikhmon-agent.sh https://raw.githubusercontent.com/heruhendri/mikhmon-agent/installer/install-mikhmon-agent.sh
 chmod +x install-mikhmon-agent.sh
 ./install-mikhmon-agent.sh
 ```
