@@ -5,9 +5,7 @@
  */
 
 session_start();
-error_reporting(E_ALL);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
+error_reporting(0);
 
 // Load required files
 include('../include/config.php');
@@ -18,11 +16,6 @@ include('../lib/formatbytesbites.php');
 // Load database config if available (for admin check)
 if (file_exists('../include/db_config.php')) {
     include('../include/db_config.php');
-}
-
-// Load WiFi commands module
-if (file_exists(__DIR__ . '/whatsapp_wifi_commands.php')) {
-    include_once(__DIR__ . '/whatsapp_wifi_commands.php');
 }
 
 // IMPORTANT: Save session config before overwriting $data
@@ -236,24 +229,10 @@ function processCommand($phone, $message) {
     $messageTrimmed = trim($message);
     $messageLower = strtolower($messageTrimmed);
     
-    // Try WiFi commands first (GANTI WIFI, GANTI SANDI)
-    if (function_exists('processWiFiCommand')) {
-        if (processWiFiCommand($phone, $messageLower, $messageTrimmed)) {
-            return; // WiFi command was processed
-        }
-    }
-    
     // Command: VOUCHER [USERNAME] <PROFILE> [NOMER] - Username dan Password SAMA
     // Example: VOUCHER 3K, VOUCHER 1JAM, VOUCHER 3K 08123456789
     // Example with manual username: VOUCHER user123 3K, VOUCHER user123 3K 08123456789
     if (strpos($messageLower, 'voucher ') === 0) {
-        // Check authorization (admin or agent only)
-        $auth = isAuthorizedForCommands($phone);
-        if (!$auth['authorized']) {
-            // Unauthorized - ignore command (no response)
-            return;
-        }
-        
         $rest = trim(str_replace('voucher ', '', $messageLower));
         // Parse: bisa "3K", "3K 08123456789", "user123 3K", atau "user123 3K 08123456789"
         $parts = preg_split('/\s+/', $rest);
@@ -292,13 +271,6 @@ function processCommand($phone, $message) {
     // Command: VCR [USERNAME] <PROFILE> [NOMER] - Alias untuk VOUCHER
     // Example: VCR 3K, VCR user123 3K 08123456789
     elseif (strpos($messageLower, 'vcr ') === 0) {
-        // Check authorization (admin or agent only)
-        $auth = isAuthorizedForCommands($phone);
-        if (!$auth['authorized']) {
-            // Unauthorized - ignore command (no response)
-            return;
-        }
-        
         $rest = trim(str_replace('vcr ', '', $messageLower));
         $parts = preg_split('/\s+/', $rest);
         
@@ -330,13 +302,6 @@ function processCommand($phone, $message) {
     // Command: GENERATE [USERNAME] <PROFILE> [NOMER] - Alias untuk VOUCHER
     // Example: GENERATE 3K, GENERATE user123 3K 08123456789
     elseif (strpos($messageLower, 'generate ') === 0) {
-        // Check authorization (admin or agent only)
-        $auth = isAuthorizedForCommands($phone);
-        if (!$auth['authorized']) {
-            // Unauthorized - ignore command (no response)
-            return;
-        }
-        
         $rest = trim(str_replace('generate ', '', $messageLower));
         $parts = preg_split('/\s+/', $rest);
         
@@ -368,13 +333,6 @@ function processCommand($phone, $message) {
     // Command: MEMBER <PROFILE> - Username dan Password BEDA
     // Example: MEMBER 3K, MEMBER 1JAM
     elseif (strpos($messageLower, 'member ') === 0) {
-        // Check authorization (admin or agent only)
-        $auth = isAuthorizedForCommands($phone);
-        if (!$auth['authorized']) {
-            // Unauthorized - ignore command (no response)
-            return;
-        }
-        
         $profile = trim(str_replace('member ', '', $messageLower));
         if (!empty($profile)) {
             purchaseVoucher($phone, $profile, 'member'); // Mode: username ≠ password
@@ -384,13 +342,6 @@ function processCommand($phone, $message) {
     // Command: BELI <PROFILE> - Default (menggunakan setting voucher)
     // Example: BELI 1JAM, BELI 3JAM, BELI 1HARI
     elseif (strpos($messageLower, 'beli ') === 0) {
-        // Check authorization (admin or agent only)
-        $auth = isAuthorizedForCommands($phone);
-        if (!$auth['authorized']) {
-            // Unauthorized - ignore command (no response)
-            return;
-        }
-        
         $profile = trim(str_replace('beli ', '', $messageLower));
         if (!empty($profile)) {
             purchaseVoucher($phone, $profile, 'default'); // Mode: default dari settings
@@ -410,13 +361,6 @@ function processCommand($phone, $message) {
     // Command: PULSA <SKU> <NOMER> - Beli produk Digiflazz (pulsa, data, e-money, games)
     // Example: PULSA as10 081234567890, PULSA xl5 087828060222
     elseif (strpos($messageLower, 'pulsa ') === 0) {
-        // Check authorization (admin or agent only)
-        $auth = isAuthorizedForCommands($phone);
-        if (!$auth['authorized']) {
-            // Unauthorized - ignore command (no response)
-            return;
-        }
-        
         $rest = trim(str_replace('pulsa ', '', $messageLower));
         $parts = preg_split('/\s+/', $rest, 2);
         
@@ -426,102 +370,6 @@ function processCommand($phone, $message) {
             purchaseDigiflazz($phone, $sku, $customerNo);
         } else {
             sendWhatsAppMessage($phone, "❌ *FORMAT SALAH*\n\nFormat: PULSA <SKU> <NOMER>\nContoh: PULSA as10 081234567890\n\nKetik HELP untuk bantuan");
-        }
-        return; // Valid command processed
-    }
-    // Command: GANTIWIFI <DEVICE_ID> <SSID_BARU> - Ubah WiFi SSID (detailed format)
-    // OR: GANTIWIFI <SSID_BARU> - Ubah WiFi SSID (simple format untuk pelanggan terdaftar)
-    // Example: GANTIWIFI 192168001001 ALIJAYA-NET
-    // Example: GANTIWIFI ALIJAYA-GUEST
-    elseif (strpos($messageLower, 'gantiwifi ') === 0) {
-        $rest = trim(str_replace('gantiwifi ', '', $messageLower));
-        $parts = preg_split('/\s+/', $rest, 2);
-        
-        // Determine if this is simple format (1 param) or detailed format (2 params)
-        if (count($parts) == 1) {
-            // Simple format: GANTIWIFI <SSID_BARU>
-            $newSSID = trim($parts[0]);
-            if (!empty($newSSID)) {
-                changeWiFiSSIDByCustomer($phone, $newSSID);
-            }
-        } elseif (count($parts) >= 2) {
-            // Detailed format: GANTIWIFI <DEVICE_ID> <SSID_BARU>
-            $deviceId = trim($parts[0]);
-            $newSSID = trim($parts[1]);
-            changeWiFiSSID($phone, $deviceId, $newSSID);
-        } else {
-            sendWhatsAppMessage($phone, "❌ *FORMAT SALAH*\n\nFormat 1 (Simple): GANTIWIFI <SSID_BARU>\nContoh: GANTIWIFI ALIJAYA-GUEST\n\nFormat 2 (Detail): GANTIWIFI <DEVICE_ID> <SSID_BARU>\nContoh: GANTIWIFI 192168001001 ALIJAYA-NET");
-        }
-        return; // Valid command processed
-    }
-    // Command: GANTISANDI <DEVICE_ID> <PASSWORD_BARU> - Ubah WiFi Password (detailed format)
-    // OR: GANTISANDI <PASSWORD_BARU> - Ubah WiFi Password (simple format untuk pelanggan terdaftar)
-    // Example: GANTISANDI 192168001001 password123456
-    // Example: GANTISANDI password123456
-    elseif (strpos($messageLower, 'gantisandi ') === 0) {
-        $rest = trim(str_replace('gantisandi ', '', $messageLower));
-        $parts = preg_split('/\s+/', $rest, 2);
-        
-        // Determine if this is simple format (1 param) or detailed format (2 params)
-        if (count($parts) == 1) {
-            // Simple format: GANTISANDI <PASSWORD_BARU>
-            $newPassword = trim($parts[0]);
-            if (!empty($newPassword)) {
-                changeWiFiPasswordByCustomer($phone, $newPassword);
-            }
-        } elseif (count($parts) >= 2) {
-            // Detailed format: GANTISANDI <DEVICE_ID> <PASSWORD_BARU>
-            $deviceId = trim($parts[0]);
-            $newPassword = trim($parts[1]);
-            changeWiFiPassword($phone, $deviceId, $newPassword);
-        } else {
-            sendWhatsAppMessage($phone, "❌ *FORMAT SALAH*\n\nFormat 1 (Simple): GANTISANDI <PASSWORD_BARU>\nContoh: GANTISANDI password123456\n\nFormat 2 (Detail): GANTISANDI <DEVICE_ID> <PASSWORD_BARU>\nContoh: GANTISANDI 192168001001 password123456");
-        }
-        return; // Valid command processed
-    }
-    // Command: CARIPERANGKAT <NOMOR|USERNAME> - Cari Device ID dari nomor atau username
-    // Example: CARIPERANGKAT 081234567890, CARIPERANGKAT user123
-    elseif (strpos($messageLower, 'cariperangkat ') === 0) {
-        $rest = trim(str_replace('cariperangkat ', '', $messageLower));
-        
-        if (!empty($rest)) {
-            findDeviceByPhoneOrUsername($phone, $rest);
-        } else {
-            sendWhatsAppMessage($phone, "❌ *FORMAT SALAH*\n\nFormat: CARIPERANGKAT <NOMOR_TELEPON|USERNAME>\nContoh: CARIPERANGKAT 081234567890\nContoh: CARIPERANGKAT user123");
-        }
-        return; // Valid command processed
-    }
-    // Command: GANTIWIFI <SSID_BARU> - Ubah WiFi SSID (simple format untuk pelanggan terdaftar - auto lookup)
-    // Example: GANTIWIFI ALIJAYA-GUEST
-    elseif (strpos($messageLower, 'gantiwifi ') === 0 && strpos($messageLower, 'gantiwifi ') === 0) {
-        $newSSID = trim(str_replace('gantiwifi ', '', $messageLower));
-        
-        // Check if this looks like a device ID format (contains dots or numbers)
-        $isDeviceId = (strpos($newSSID, '.') !== false || (strlen($newSSID) > 10 && preg_match('/\d+/', $newSSID)));
-        
-        if (!$isDeviceId && !empty($newSSID)) {
-            // This is simple format - auto lookup customer
-            changeWiFiSSIDByCustomer($phone, $newSSID);
-        } else {
-            // This will be handled by the detailed GANTIWIFI command below
-            // Continue to next condition
-        }
-        return; // Valid command processed
-    }
-    // Command: GANTISANDI <PASSWORD_BARU> - Ubah WiFi Password (simple format untuk pelanggan terdaftar - auto lookup)
-    // Example: GANTISANDI password123456
-    elseif (strpos($messageLower, 'gantisandi ') === 0) {
-        $newPassword = trim(str_replace('gantisandi ', '', $messageLower));
-        
-        // Check if this looks like a device ID format
-        $isDeviceId = (strpos($newPassword, '.') !== false || (strlen($newPassword) > 32));
-        
-        if (!$isDeviceId && !empty($newPassword)) {
-            // This is simple format - auto lookup customer
-            changeWiFiPasswordByCustomer($phone, $newPassword);
-        } else {
-            // This will be handled by detailed command
-            // Continue to next condition
         }
         return; // Valid command processed
     }
@@ -695,25 +543,6 @@ function isAdminNumber($phone) {
 }
 
 /**
- * Check if user is authorized for commands (admin or active agent)
- * Returns array with authorization status, role, and agent data
- */
-function isAuthorizedForCommands($phone) {
-    // Check if admin
-    if (isAdminNumber($phone)) {
-        return ['authorized' => true, 'role' => 'admin', 'agent' => null];
-    }
-    
-    // Check if agent
-    $agent = getAgentByPhone($phone);
-    if ($agent && $agent['status'] === 'active') {
-        return ['authorized' => true, 'role' => 'agent', 'agent' => $agent];
-    }
-    
-    return ['authorized' => false, 'role' => null, 'agent' => null];
-}
-
-/**
  * Purchase voucher
  * @param string $phone Nomor WhatsApp (agent/admin)
  * @param string $profileName Nama profile MikroTik
@@ -740,25 +569,6 @@ function purchaseVoucher($phone, $profileName, $mode = 'default', $customerPhone
     
     // Check if admin
     $isAdmin = isAdminNumber($phone);
-    
-    // Check if agent (only for non-admin users)
-    if (!$isAdmin) {
-        // Load Agent class
-        if (!class_exists('Agent')) {
-            require_once('../lib/Agent.class.php');
-        }
-        
-        $agent = getAgentByPhone($phone);
-        if (!$agent) {
-            sendWhatsAppMessage($phone, "❌ *AKSES DITOLAK*\n\nFitur ini hanya untuk Admin & Agent.\n\nHubungi administrator untuk registrasi agent.");
-            return;
-        }
-        
-        if ($agent['status'] !== 'active') {
-            sendWhatsAppMessage($phone, "❌ *AKUN TIDAK AKTIF*\n\nAkun agent Anda tidak aktif.\nHubungi administrator.");
-            return;
-        }
-    }
     
     // Get first session (you can modify this to use specific session)
     $sessions = array_keys($data);
@@ -927,33 +737,6 @@ function purchaseVoucher($phone, $profileName, $mode = 'default', $customerPhone
     $price = explode(",", $ponlogin)[2];
     $sprice = explode(",", $ponlogin)[4];
     
-    // Check if agent (non-admin) and check balance
-    if (!$isAdmin) {
-        // Get agent price
-        $agentClass = new Agent();
-        $priceData = $agentClass->getAgentPrice($agent['id'], $profileName);
-        
-        if (!$priceData) {
-            $API->disconnect();
-            sendWhatsAppMessage($phone, "❌ Harga untuk profile *$profileName* belum diset.\nHubungi admin.");
-            return;
-        }
-        
-        $buyPrice = $priceData['buy_price'];
-        
-        // Check balance
-        if ($agent['balance'] < $buyPrice) {
-            $reply = "❌ *SALDO TIDAK CUKUP*\n\n";
-            $reply .= "Saldo Anda: Rp " . number_format($agent['balance'], 0, ',', '.') . "\n";
-            $reply .= "Dibutuhkan: Rp " . number_format($buyPrice, 0, ',', '.') . "\n";
-            $reply .= "Kurang: Rp " . number_format($buyPrice - $agent['balance'], 0, ',', '.') . "\n\n";
-            $reply .= "Silakan topup saldo terlebih dahulu.";
-            $API->disconnect();
-            sendWhatsAppMessage($phone, $reply);
-            return;
-        }
-    }
-    
     // Generate username and password berdasarkan mode
     $username = '';
     $password = '';
@@ -1065,53 +848,6 @@ function purchaseVoucher($phone, $profileName, $mode = 'default', $customerPhone
     
     $API->disconnect();
     
-    // Deduct balance for agent (only for non-admin)
-    $transactionId = null;
-    $balanceBefore = 0;
-    $balanceAfter = 0;
-    
-    if (!$isAdmin) {
-        // Deduct balance
-        $agentClass = new Agent();
-        $deductResult = $agentClass->deductBalance(
-            $agent['id'],
-            $buyPrice,
-            $profileName,
-            $username,
-            'Generate via WhatsApp'
-        );
-        
-        if (!$deductResult['success']) {
-            sendWhatsAppMessage($phone, "❌ *GAGAL POTONG SALDO*\n\n" . $deductResult['message']);
-            return;
-        }
-        
-        $transactionId = $deductResult['transaction_id'];
-        $balanceBefore = $deductResult['balance_before'];
-        $balanceAfter = $deductResult['balance_after'];
-        
-        // Save to agent_vouchers
-        if (function_exists('getDBConnection')) {
-            try {
-                $db = getDBConnection();
-                $sql = "INSERT INTO agent_vouchers (agent_id, transaction_id, username, password, profile_name, buy_price, sell_price, sent_via) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 'whatsapp')";
-                $stmt = $db->prepare($sql);
-                $stmt->execute([
-                    $agent['id'],
-                    $transactionId,
-                    $username,
-                    $password,
-                    $profileName,
-                    $buyPrice,
-                    $priceData['sell_price']
-                ]);
-            } catch (Exception $e) {
-                error_log("Error saving agent voucher: " . $e->getMessage());
-            }
-        }
-    }
-    
     // Format price
     if (strpos($currency, 'Rp') !== false || strpos($currency, 'IDR') !== false) {
         $priceFormatted = $currency . " " . number_format((float)$sprice, 0, ",", ".");
@@ -1153,12 +889,6 @@ function purchaseVoucher($phone, $profileName, $mode = 'default', $customerPhone
     
     $voucherMsg .= "\nLogin URL:\n";
     $voucherMsg .= "http://$dnsname/login?username=$username&password=$password\n\n";
-    
-    // Show balance for agent
-    if (!$isAdmin && $balanceAfter > 0) {
-        $voucherMsg .= "💳 *Saldo Anda: Rp " . number_format($balanceAfter, 0, ',', '.') . "*\n\n";
-    }
-    
     $voucherMsg .= "━━━━━━━━━━━━━━━━━━━━\n";
     $voucherMsg .= "_Terima kasih telah menggunakan layanan kami_";
     
@@ -1318,42 +1048,6 @@ function addPPPoESecret($phone, $username, $password, $profile) {
     
     // Connect to MikroTik
     $API = new RouterosAPI();
-}
-
-/**
- * Generate Voucher
- */
-function generateVoucher($phone, $profileName, $username, $password, $validity, $sprice, $currency, $isAdmin, $agent) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
     $API->debug = false;
     
     if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
@@ -1370,10 +1064,10 @@ function generateVoucher($phone, $profileName, $username, $password, $validity, 
     }
     
     // Check if profile exists
-    $checkProfile = $API->comm("/ppp/profile/print", array("?name" => $profileName));
+    $checkProfile = $API->comm("/ppp/profile/print", array("?name" => $profile));
     if (empty($checkProfile)) {
         $API->disconnect();
-        sendWhatsAppMessage($phone, "❌ *PROFILE TIDAK DITEMUKAN*\n\nProfile *$profileName* tidak ada di MikroTik.");
+        sendWhatsAppMessage($phone, "❌ *PROFILE TIDAK DITEMUKAN*\n\nProfile *$profile* tidak ada di MikroTik.");
         return;
     }
     
@@ -1382,12 +1076,12 @@ function generateVoucher($phone, $profileName, $username, $password, $validity, 
         "name" => $username,
         "password" => $password,
         "service" => "pppoe",
-        "profile" => $profileName
+        "profile" => $profile
     ));
     
     $API->disconnect();
     
-    sendWhatsAppMessage($phone, "✅ *PPPoE SECRET BERHASIL DITAMBAH*\n\nUsername: *$username*\nProfile: *$profileName*");
+    sendWhatsAppMessage($phone, "✅ *PPPoE SECRET BERHASIL DITAMBAH*\n\nUsername: *$username*\nProfile: *$profile*");
 }
 
 /**
@@ -1455,28 +1149,9 @@ function editPPPoESecret($phone, $username, $newProfile) {
         "profile" => $newProfile
     ));
     
-    // Disconnect active session (jika ada) agar client reconnect dengan profile baru
-    $activeSessions = $API->comm("/ppp/active/print", array("?name" => $username));
-    if (!empty($activeSessions)) {
-        foreach ($activeSessions as $activeSession) {
-            $API->comm("/ppp/active/remove", array(
-                ".id" => $activeSession['.id']
-            ));
-        }
-        $activeSessionCount = count($activeSessions);
-    } else {
-        $activeSessionCount = 0;
-    }
-    
     $API->disconnect();
     
-    // Build response message
-    $message = "✅ *PROFILE BERHASIL DIUPDATE*\n\nUsername: *$username*\nProfile Baru: *$newProfile*";
-    if ($activeSessionCount > 0) {
-        $message .= "\n\n✔️ Session aktif ($activeSessionCount) sudah dihapus.\nClient akan reconnect otomatis dengan profile baru.";
-    }
-    
-    sendWhatsAppMessage($phone, $message);
+    sendWhatsAppMessage($phone, "✅ *PROFILE BERHASIL DIUPDATE*\n\nUsername: *$username*\nProfile Baru: *$newProfile*");
 }
 
 /**
@@ -1539,9 +1214,9 @@ function deletePPPoESecret($phone, $username) {
 }
 
 /**
- * Ping MikroTik
+ * Check MikroTik Ping
  */
-function pingMikroTik($phone) {
+function checkMikroTikPing($phone) {
     global $sessionConfig;
     
     $data = $sessionConfig;
@@ -1586,819 +1261,6 @@ function pingMikroTik($phone) {
         $message = "❌ *PING GAGAL*\n\n";
         $message .= "IP: *$iphost*\n";
         $message .= "Tidak dapat terhubung ke MikroTik.";
-    }
-    
-    sendWhatsAppMessage($phone, $message);
-}
-
-/**
- * Check MikroTik Status
- */
-function checkMikroTikStatus($phone) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
-    $API->debug = false;
-    
-    if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
-        sendWhatsAppMessage($phone, "❌ *GAGAL TERHUBUNG*\n\nTidak dapat terhubung ke MikroTik.");
-        return;
-    }
-    
-    // Get system info
-    $systemInfo = $API->comm("/system/resource/print");
-    $uptime = $systemInfo[0]['uptime'];
-    $cpuLoad = $systemInfo[0]['cpu-load'];
-    $freeMemory = $systemInfo[0]['free-memory'];
-    $totalMemory = $systemInfo[0]['total-memory'];
-    $freeHDD = $systemInfo[0]['free-hdd-space'];
-    $totalHDD = $systemInfo[0]['total-hdd-space'];
-    
-    $API->disconnect();
-    
-    $message = "✅ *STATUS MIKROTIK*\n\n";
-    $message .= "Uptime: *$uptime*\n";
-    $message .= "CPU Load: *$cpuLoad%*\n";
-    $message .= "Memory: *" . formatBytes($freeMemory) . " / " . formatBytes($totalMemory) . "*\n";
-    $message .= "HDD: *" . formatBytes($freeHDD) . " / " . formatBytes($totalHDD) . "*";
-}
-
-/**
- * Format bytes to human-readable format
- */
-function formatBytes($bytes, $precision = 2) {
-    $units = array('B', 'KB', 'MB', 'GB', 'TB');
-    $bytes = max($bytes, 0);
-    $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-    $pow = min($pow, count($units) - 1);
-    $bytes /= pow(1024, $pow);
-    return round($bytes, $precision) . ' ' . $units[$pow];
-}
-
-/**
- * Check PPPoE Active
- */
-function checkPPPoEActive($phone) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
-    $API->debug = false;
-    
-    if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
-        sendWhatsAppMessage($phone, "❌ *GAGAL TERHUBUNG*\n\nTidak dapat terhubung ke MikroTik.");
-        return;
-    }
-    
-    // Get PPPoE active sessions
-    $pppoeActive = $API->comm("/ppp/active/print");
-    $API->disconnect();
-    
-    if (empty($pppoeActive)) {
-        sendWhatsAppMessage($phone, "Tidak ada PPPoE aktif.");
-        return;
-    }
-    
-    $message = "✅ *PPPoE AKTIF*\n\n";
-    $message .= "Total: *" . count($pppoeActive) . "*\n\n";
-    
-    foreach ($pppoeActive as $session) {
-        $username = $session['name'];
-        $uptime = $session['uptime'];
-        $address = $session['address'];
-        $encoding = $session['encoding'];
-        $service = $session['service'];
-        $profile = $session['profile'];
-        $rx = $session['rx-byte'];
-        $tx = $session['tx-byte'];
-        
-        $message .= "Username: *$username*\n";
-        $message .= "Uptime: *$uptime*\n";
-        $message .= "IP Address: *$address*\n";
-        $message .= "Encoding: *$encoding*\n";
-        $message .= "Service: *$service*\n";
-        $message .= "Profile: *$profile*\n";
-        $message .= "Traffic: *" . formatBytes($rx) . " / " . formatBytes($tx) . "*\n\n";
-    }
-    
-    sendWhatsAppMessage($phone, $message);
-}
-
-/**
- * Check MikroTik Status
- */
-function checkMikroTikStatus($phone) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
-    $API->debug = false;
-    
-    if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
-        sendWhatsAppMessage($phone, "❌ *GAGAL TERHUBUNG*\n\nTidak dapat terhubung ke MikroTik.");
-        return;
-    }
-    
-    // Get system info
-    $systemInfo = $API->comm("/system/resource/print");
-    $uptime = $systemInfo[0]['uptime'];
-    $cpuLoad = $systemInfo[0]['cpu-load'];
-    $freeMemory = $systemInfo[0]['free-memory'];
-    $totalMemory = $systemInfo[0]['total-memory'];
-    $freeHDD = $systemInfo[0]['free-hdd-space'];
-    $totalHDD = $systemInfo[0]['total-hdd-space'];
-    
-    $API->disconnect();
-    
-    $message = "✅ *STATUS MIKROTIK*\n\n";
-    $message .= "Uptime: *$uptime*\n";
-    $message .= "CPU Load: *$cpuLoad%*\n";
-    $message .= "Memory: *" . formatBytes($freeMemory) . " / " . formatBytes($totalMemory) . "*\n";
-    $message .= "HDD: *" . formatBytes($freeHDD) . " / " . formatBytes($totalHDD) . "*";
-}
-/**
- * Check MikroTik Resource
- */
-function checkMikroTikResource($phone) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
-    $API->debug = false;
-    
-    if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
-        sendWhatsAppMessage($phone, "❌ *GAGAL TERHUBUNG*\n\nTidak dapat terhubung ke MikroTik.");
-        return;
-    }
-    
-    // Get system info
-    $systemInfo = $API->comm("/system/resource/print");
-    $uptime = $systemInfo[0]['uptime'];
-    $cpuLoad = $systemInfo[0]['cpu-load'];
-    $freeMemory = $systemInfo[0]['free-memory'];
-    $totalMemory = $systemInfo[0]['total-memory'];
-    $freeHDD = $systemInfo[0]['free-hdd-space'];
-    $totalHDD = $systemInfo[0]['total-hdd-space'];
-    
-    $API->disconnect();
-    
-    $message = "✅ *STATUS MIKROTIK*\n\n";
-    $message .= "Uptime: *$uptime*\n";
-    $message .= "CPU Load: *$cpuLoad%*\n";
-    $message .= "Memory: *" . formatBytes($freeMemory) . " / " . formatBytes($totalMemory) . "*\n";
-    $message .= "HDD: *" . formatBytes($freeHDD) . " / " . formatBytes($totalHDD) . "*";
-    
-    sendWhatsAppMessage($phone, $message);
-}
-
-/**
- * Disable PPPoE Secret
- */
-function disablePPPoESecret($phone, $username) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
-    $API->debug = false;
-    
-    if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
-        sendWhatsAppMessage($phone, "❌ *GAGAL TERHUBUNG*\n\nTidak dapat terhubung ke MikroTik.");
-        return;
-    }
-    
-    // Find user
-    $users = $API->comm("/ppp/secret/print", array("?name" => $username));
-    if (empty($users)) {
-        $API->disconnect();
-        sendWhatsAppMessage($phone, "❌ *USERNAME TIDAK DITEMUKAN*\n\nUsername *$username* tidak ada di MikroTik.");
-        return;
-    }
-    
-    $userId = $users[0]['.id'];
-    
-    // Disable user
-    $API->comm("/ppp/secret/disable", array(".id" => $userId));
-    
-    $API->disconnect();
-    
-    sendWhatsAppMessage($phone, "✅ *PPPoE SECRET BERHASIL DINONAKTIFKAN*\n\nUsername: *$username*");
-}
-
-/**
- * Disable Hotspot User
- */
-function disableHotspotUser($phone, $username) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
-    $API->debug = false;
-    
-    if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
-        sendWhatsAppMessage($phone, "❌ *GAGAL TERHUBUNG*\n\nTidak dapat terhubung ke MikroTik.");
-        return;
-    }
-    
-    // Find user
-    $users = $API->comm("/ip/hotspot/user/print", array("?name" => $username));
-    if (empty($users)) {
-        $API->disconnect();
-        sendWhatsAppMessage($phone, "❌ *USERNAME TIDAK DITEMUKAN*\n\nUsername *$username* tidak ada di MikroTik.");
-        return;
-    }
-    
-    $userId = $users[0]['.id'];
-    
-    // Disable user
-    $API->comm("/ip/hotspot/user/disable", array(".id" => $userId));
-    
-    $API->disconnect();
-    
-    sendWhatsAppMessage($phone, "✅ *HOTSPOT USER BERHASIL DINONAKTIFKAN*\n\nUsername: *$username*");
-}
-
-/**
- * Enable PPPoE Secret
- */
-function enablePPPoESecret($phone, $username) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
-    $API->debug = false;
-    
-    if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
-        sendWhatsAppMessage($phone, "❌ *GAGAL TERHUBUNG*\n\nTidak dapat terhubung ke MikroTik.");
-        return;
-    }
-    
-    // Find user
-    $users = $API->comm("/ppp/secret/print", array("?name" => $username));
-    if (empty($users)) {
-        $API->disconnect();
-        sendWhatsAppMessage($phone, "❌ *USERNAME TIDAK DITEMUKAN*\n\nUsername *$username* tidak ada di MikroTik.");
-        return;
-    }
-    
-    $userId = $users[0]['.id'];
-    
-    // Enable user
-    $API->comm("/ppp/secret/enable", array(".id" => $userId));
-    
-    $API->disconnect();
-    
-    sendWhatsAppMessage($phone, "✅ *PPPoE SECRET BERHASIL DIHIDUPKAN*\n\nUsername: *$username*");
-}
-
-/**
- * Enable Hotspot User
- */
-function enableHotspotUser($phone, $username) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
-    $API->debug = false;
-    
-    if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
-        sendWhatsAppMessage($phone, "❌ *GAGAL TERHUBUNG*\n\nTidak dapat terhubung ke MikroTik.");
-        return;
-    }
-    
-    // Find user
-    $users = $API->comm("/ip/hotspot/user/print", array("?name" => $username));
-    if (empty($users)) {
-        $API->disconnect();
-        sendWhatsAppMessage($phone, "❌ *USERNAME TIDAK DITEMUKAN*\n\nUsername *$username* tidak ada di MikroTik.");
-        return;
-    }
-    
-    $userId = $users[0]['.id'];
-    
-    // Enable user
-    $API->comm("/ip/hotspot/user/enable", array(".id" => $userId));
-    
-    $API->disconnect();
-    
-    sendWhatsAppMessage($phone, "✅ *HOTSPOT USER BERHASIL DIHIDUPKAN*\n\nUsername: *$username*");
-}
-
-/**
- * Check PPPoE Offline
- */
-function checkPPPoEOffline($phone) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
-    $API->debug = false;
-    
-    if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
-        sendWhatsAppMessage($phone, "❌ *GAGAL TERHUBUNG*\n\nTidak dapat terhubung ke MikroTik.");
-        return;
-    }
-    
-    // Get PPPoE secrets
-    $pppoeSecrets = $API->comm("/ppp/secret/print");
-    $API->disconnect();
-    
-    if (empty($pppoeSecrets)) {
-        sendWhatsAppMessage($phone, "Tidak ada PPPoE secret.");
-        return;
-    }
-    
-    $offlineUsers = [];
-    
-    foreach ($pppoeSecrets as $secret) {
-        $username = $secret['name'];
-        $disabled = $secret['disabled'];
-        $uptime = $secret['uptime'];
-        
-        if ($disabled == 'true' || empty($uptime)) {
-            $offlineUsers[] = $username;
-        }
-    }
-    
-    if (empty($offlineUsers)) {
-        sendWhatsAppMessage($phone, "Tidak ada PPPoE offline.");
-        return;
-    }
-    
-    $message = "✅ *PPPoE OFFLINE*\n\n";
-    $message .= "Total: *" . count($offlineUsers) . "*\n\n";
-    $message .= implode("\n", $offlineUsers);
-    
-    sendWhatsAppMessage($phone, $message);
-}
-
-/**
- * Check Digiflazz Balance
- */
-function checkDigiflazzBalance($phone)
-{
-    $url = DIGIFLAZZ_API_URL . "/cek_saldo";
-    $data = [
-        "username" => DIGIFLAZZ_USERNAME,
-        "sign" => md5(DIGIFLAZZ_USERNAME . DIGIFLAZZ_API_KEY),
-    ];
-
-    $response = sendPostRequest($url, $data);
-    $response = json_decode($response, true);
-
-    if ($response['data']['status'] == '00') {
-        $diskTotal = $response['data']['diskon_total'];
-        $diskTotalFormatted = number_format($diskTotal, 0, ',', '.');
-        $message = "✅ *SALDO DIGIFLAZZ*\n\n";
-        $message .= "Total: *$diskTotalFormatted*";
-        
-        sendWhatsAppMessage($phone, $message);
-    } else {
-        sendWhatsAppMessage($phone, "Gagal mendapatkan saldo Digiflazz.");
-    }
-}
-
-/**
-/**
- * Check Digiflazz Balance
- */
-function checkDigiflazzBalance($phone) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
-    $API->debug = false;
-    
-    if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
-        sendWhatsAppMessage($phone, "❌ *GAGAL TERHUBUNG*\n\nTidak dapat terhubung ke MikroTik.");
-        return;
-    }
-    
-    // Get Digiflazz balance
-    $digiflazzBalance = $API->comm("/system/script/print", array("?name" => "digiflazz_balance"));
-    $API->disconnect();
-    
-    if (empty($digiflazzBalance)) {
-        sendWhatsAppMessage($phone, "❌ *DIGIFLAZZ BALANCE TIDAK DITEMUKAN*\n\nPastikan script `digiflazz_balance` sudah dibuat di MikroTik.");
-        return;
-    }
-    
-    $balance = $digiflazzBalance[0]['source'];
-    
-    sendWhatsAppMessage($phone, "✅ *DIGIFLAZZ BALANCE*\n\nSaldo: *$balance*");
-}
-
-/**
- * Format bytes to human-readable format
- */
-function formatBytes($bytes, $precision = 2) {
-    $units = array('B', 'KB', 'MB', 'GB', 'TB');
-    
-    $bytes = max($bytes, 0);
-    $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-    $pow = min($pow, count($units) - 1);
-    
-    $bytes /= pow(1024, $pow);
-    
-    return round($bytes, $precision) . ' ' . $units[$pow];
-}
-
-/**
- * Log webhook error
- */
-function logWebhookError($phone, $command, $message) {
-    error_log("WhatsApp Webhook Error: [$phone] [$command] $message");
-}
-
-/**
- * Log WhatsApp transaction
- */
-function logWhatsAppTransaction($phone, $username, $status, $data) {
-    error_log("WhatsApp Transaction: [$phone] [$username] [$status] $data");
-}
-
-/**
- * Send WhatsApp message
- */
-function sendWhatsAppMessage($phone, $message) {
-    // Format phone number
-    $phone = formatWhatsAppNumber($phone);
-    
-    // Check if db_config exists
-    if (!function_exists('getDBConnection')) {
-        return ['success' => false, 'message' => 'Database connection not available'];
-    }
-    
-    try {
-        $db = getDBConnection();
-        if (!$db) {
-            return ['success' => false, 'message' => 'Database connection failed'];
-        }
-        
-        $stmt = $db->query("SELECT setting_value FROM agent_settings WHERE setting_key = 'whatsapp_webhook_url'");
-        $result = $stmt->fetch();
-        
-        if ($result) {
-            $webhookUrl = $result['setting_value'];
-            
-            // Prepare data
-            $data = [
-                'phone' => $phone,
-                'message' => $message
-            ];
-            
-            // Send POST request
-            $ch = curl_init($webhookUrl);
-            curl_setopt($ch, CURLOPT_POST, 1);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            
-            if ($httpCode == 200) {
-                return ['success' => true, 'message' => $response];
-            } else {
-                return ['success' => false, 'message' => "HTTP Error: $httpCode"];
-            }
-        } else {
-            return ['success' => false, 'message' => 'WhatsApp webhook URL not set'];
-        }
-    } catch (Exception $e) {
-        return ['success' => false, 'message' => 'Database error: ' . $e->getMessage()];
-    }
-}
-
-/**
- * Format WhatsApp number
- */
-function formatWhatsAppNumber($phone) {
-    // Remove non-numeric characters
-    $phone = preg_replace('/[^0-9]/', '', $phone);
-    
-    // Add country code if missing
-    if (strlen($phone) == 10) {
-        $phone = '62' . $phone;
-    }
-    
-    return $phone;
-}
-
-/**
- * Decrypt password
- */
-function decrypt($password) {
-    // Placeholder for decryption logic
-    return $password;
-}
-
-/**
- * Check MikroTik Ping
- */
-function checkMikroTikPing($phone) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi session tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    // Connect to MikroTik
-    $API = new RouterosAPI();
-    $API->debug = false;
-    
-    if ($API->connect($iphost, $userhost, decrypt($passwdhost))) {
-        $API->disconnect();
-        $message = "✅ *KONEKSI BERHASIL*\n\n";
-        $message .= "Terhubung ke MikroTik:\n";
-        $message .= "IP: *$iphost*\n";
-        $message .= "User: *$userhost*";
-    } else {
-        $message = "❌ *KONEKSI GAGAL*\n\n";
-        $message .= "Tidak dapat terhubung ke MikroTik:\n";
-        $message .= "IP: *$iphost*\n";
-        $message .= "User: *$userhost*";
     }
     
     sendWhatsAppMessage($phone, $message);
@@ -2620,8 +1482,6 @@ function checkMikroTikResource($phone) {
     
     sendWhatsAppMessage($phone, $message);
 }
-
-    $message .= "💿 *DISK*\n";
 
 /**
  * Disable PPPoE Secret
@@ -3013,17 +1873,17 @@ function sendHelp($phone) {
     $message .= "*Perintah yang tersedia:*\n\n";
     $message .= "📋 *HARGA* atau *PAKET*\n";
     $message .= "Melihat daftar paket dan harga\n\n";
-    $message .= "🎫 *VOUCHER [USERNAME] <NAMA_PAKET> [NOMER>*\n";
+    $message .= "🎫 *VOUCHER [USERNAME] <NAMA_PAKET> [NOMER]*\n";
     $message .= "Membeli voucher (Username = Password)\n";
     $message .= "Contoh: VOUCHER 3K\n";
     $message .= "Contoh dengan nomor: VOUCHER 3K 08123456789\n";
     $message .= "Contoh username manual: VOUCHER user123 3K\n";
     $message .= "Contoh lengkap: VOUCHER user123 3K 08123456789\n";
     $message .= "Voucher akan dikirim ke nomor pembeli dan agent\n\n";
-    $message .= "⚡ *VCR [USERNAME] <NAMA_PAKET> [NOMER>*\n";
+    $message .= "⚡ *VCR [USERNAME] <NAMA_PAKET> [NOMER]*\n";
     $message .= "Perintah singkat untuk VOUCHER\n";
     $message .= "Contoh: VCR 3K, VCR user123 3K 08123456789\n\n";
-    $message .= "⚙️ *GENERATE [USERNAME] <NAMA_PAKET> [NOMER>*\n";
+    $message .= "⚙️ *GENERATE [USERNAME] <NAMA_PAKET> [NOMER]*\n";
     $message .= "Alias untuk VOUCHER\n";
     $message .= "Contoh: GENERATE 3K, GENERATE user123 3K 08123456789\n\n";
     $message .= "👤 *MEMBER <NAMA_PAKET>*\n";
@@ -3032,22 +1892,6 @@ function sendHelp($phone) {
     $message .= "🛒 *BELI <NAMA_PAKET>*\n";
     $message .= "Membeli voucher (menggunakan setting default)\n";
     $message .= "Contoh: BELI 1JAM\n\n";
-    $message .= "🔍 *CARIPERANGKAT <NOMOR|USERNAME>*\n";
-    $message .= "Cari Device ID dari nomor telepon atau username PPPoE\n";
-    $message .= "Contoh: CARIPERANGKAT 081234567890\n";
-    $message .= "Contoh: CARIPERANGKAT user123\n\n";
-    $message .= "📡 *GANTI WIFI <SSID_BARU>*\n";
-    $message .= "Ubah WiFi SSID ONU Anda (untuk pelanggan terdaftar)\n";
-    $message .= "Contoh: GANTI WIFI ALIJAYA-GUEST\n\n";
-    $message .= "📡 *GANTI WIFI <NOMOR/USERNAME> <SSID_BARU>*\n";
-    $message .= "Ubah WiFi SSID Pelanggan (Admin)\n";
-    $message .= "Contoh: GANTI WIFI 081234567890 ALIJAYA-NET\n\n";
-    $message .= "🔐 *GANTI SANDI <PASSWORD_BARU>*\n";
-    $message .= "Ubah WiFi Password ONU Anda (untuk pelanggan terdaftar)\n";
-    $message .= "Contoh: GANTI SANDI password123456\n\n";
-    $message .= "🔐 *GANTI SANDI <NOMOR/USERNAME> <PASSWORD_BARU>*\n";
-    $message .= "Ubah WiFi Password Pelanggan (Admin)\n";
-    $message .= "Contoh: GANTI SANDI 081234567890 password123456\n\n";
     
     // Admin-only commands
     $isAdmin = isAdminNumber($phone);
@@ -3167,25 +2011,28 @@ function purchaseDigiflazz($phone, $sku, $customerNo) {
             return;
         }
         
-        // Check if admin
+        // Check if user is admin or agent
         $isAdmin = isAdminNumber($phone);
+        $agent = null;
+        $agentId = null;
         
-        // Check if agent (only for non-admin users)
         if (!$isAdmin) {
+            // Try to get agent by phone
             $agent = getAgentByPhone($phone);
+            
             if (!$agent) {
                 sendWhatsAppMessage($phone, "❌ *AKSES DITOLAK*\n\nFitur ini hanya untuk Admin & Agent.\n\nHubungi administrator untuk registrasi agent.");
                 return;
             }
             
+            $agentId = $agent['id'];
+            
+            // Check agent status
             if ($agent['status'] !== 'active') {
                 sendWhatsAppMessage($phone, "❌ *AKUN TIDAK AKTIF*\n\nAkun agent Anda tidak aktif.\nHubungi administrator.");
                 return;
             }
         }
-        
-        // Get first session (you can modify this to use specific session)
-        $session = $digiflazz->getSessions()[0];
         
         // Calculate price
         $digiflazzSettings = $digiflazz->getSettings();
@@ -3541,554 +2388,6 @@ function checkDigiflazzBalance($phone) {
     }
 }
 
-/**
- * Find and get PPPoE/Hotspot username from WhatsApp phone number
- * Returns username if customer found, null otherwise
- */
-function getCustomerUsernameByPhone($phone) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        return null;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        return null;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    try {
-        // Check database first for phone lookup
-        if (function_exists('getDBConnection')) {
-            try {
-                $db = getDBConnection();
-                if ($db) {
-                    // Normalize phone numbers for comparison
-                    $phoneVariants = [];
-                    $phoneVariants[] = $phone;
-                    
-                    if (strpos($phone, '62') === 0) {
-                        $phoneVariants[] = '0' . substr($phone, 2);
-                    }
-                    if (strpos($phone, '0') === 0) {
-                        $phoneVariants[] = '62' . substr($phone, 1);
-                    }
-                    
-                    // Search in billing_customers
-                    foreach ($phoneVariants as $variant) {
-                        $stmt = $db->prepare("SELECT username FROM billing_customers WHERE phone = :phone OR phone = :phone2 LIMIT 1");
-                        $stmt->execute([':phone' => $variant, ':phone2' => $variant]);
-                        $customer = $stmt->fetch(PDO::FETCH_ASSOC);
-                        
-                        if ($customer && !empty($customer['username'])) {
-                            return $customer['username'];
-                        }
-                    }
-                }
-            } catch (Exception $e) {
-                // Continue without database
-            }
-        }
-        
-        // If not in database, return null
-        return null;
-        
-    } catch (Exception $e) {
-        error_log("Error getting customer username: " . $e->getMessage());
-        return null;
-    }
-}
-
-/**
- * Change WiFi SSID for registered customer (auto lookup by phone)
- */
-function changeWiFiSSIDByCustomer($phone, $newSSID) {
-    // Validate SSID
-    if (strlen($newSSID) < 3 || strlen($newSSID) > 32) {
-        sendWhatsAppMessage($phone, "❌ *SSID TIDAK VALID*\n\nSSID harus 3-32 karakter.\nSSID Anda: {$newSSID} (" . strlen($newSSID) . " karakter)");
-        return;
-    }
-    
-    // Check for special characters
-    if (preg_match('/[<>&"\'`]/', $newSSID)) {
-        sendWhatsAppMessage($phone, "❌ *SSID TIDAK VALID*\n\nSSID tidak boleh mengandung karakter spesial: < > & \" ' `");
-        return;
-    }
-    
-    // Get customer username from phone
-    $username = getCustomerUsernameByPhone($phone);
-    
-    if (!$username) {
-        sendWhatsAppMessage($phone, "❌ *AKUN TIDAK TERDAFTAR*\n\nNomor WhatsApp Anda tidak terdaftar sebagai pelanggan.\n\nSilakan hubungi admin atau gunakan perintah:\nCARI PERANGKAT <nomor|username>");
-        return;
-    }
-    
-    // Use username as device ID
-    changeWiFiSSID($phone, $username, $newSSID);
-}
-
-/**
- * Change WiFi Password for registered customer (auto lookup by phone)
- */
-function changeWiFiPasswordByCustomer($phone, $newPassword) {
-    // Validate password
-    if (strlen($newPassword) < 8 || strlen($newPassword) > 32) {
-        sendWhatsAppMessage($phone, "❌ *PASSWORD TIDAK VALID*\n\nPassword harus 8-32 karakter.\nPassword Anda: " . str_repeat('*', strlen($newPassword)) . " (" . strlen($newPassword) . " karakter)");
-        return;
-    }
-    
-    // Check for special characters
-    if (preg_match('/[<>&"\'`]/', $newPassword)) {
-        sendWhatsAppMessage($phone, "❌ *PASSWORD TIDAK VALID*\n\nPassword tidak boleh mengandung karakter spesial: < > & \" ' `");
-        return;
-    }
-    
-    // Get customer username from phone
-    $username = getCustomerUsernameByPhone($phone);
-    
-    if (!$username) {
-        sendWhatsAppMessage($phone, "❌ *AKUN TIDAK TERDAFTAR*\n\nNomor WhatsApp Anda tidak terdaftar sebagai pelanggan.\n\nSilakan hubungi admin atau gunakan perintah:\nCARI PERANGKAT <nomor|username>");
-        return;
-    }
-    
-    // Use username as device ID
-    changeWiFiPassword($phone, $username, $newPassword);
-}
-
-/**
- * Find Device ID by Phone Number or PPPoE Username
- */
-function findDeviceByPhoneOrUsername($phone, $query) {
-    global $sessionConfig;
-    
-    $data = $sessionConfig;
-    if (empty($data) || !is_array($data)) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nKonfigurasi tidak ter-load.");
-        return;
-    }
-    
-    // Get first session
-    $sessions = array_keys($data);
-    $session = null;
-    foreach ($sessions as $s) {
-        if ($s != 'mikhmon') {
-            $session = $s;
-            break;
-        }
-    }
-    
-    if (!$session) {
-        sendWhatsAppMessage($phone, "❌ *SISTEM ERROR*\n\nSession MikroTik tidak ditemukan.");
-        return;
-    }
-    
-    // Load session config
-    $iphost = explode('!', $data[$session][1])[1];
-    $userhost = explode('@|@', $data[$session][2])[1];
-    $passwdhost = explode('#|#', $data[$session][3])[1];
-    
-    try {
-        // Connect to MikroTik
-        $API = new RouterosAPI();
-        $API->debug = false;
-        
-        if (!$API->connect($iphost, $userhost, decrypt($passwdhost))) {
-            sendWhatsAppMessage($phone, "❌ *GAGAL TERHUBUNG*\n\nTidak dapat terhubung ke MikroTik.");
-            return;
-        }
-        
-        $results = [];
-        
-        // Search in PPPoE secrets by username
-        $pppoeSecrets = $API->comm("/ppp/secret/print");
-        
-        foreach ($pppoeSecrets as $secret) {
-            $username = trim($secret['name'] ?? '');
-            
-            if (empty($username)) continue;
-            
-            // Check if query matches username
-            if (strtolower($username) === strtolower($query)) {
-                $results[] = [
-                    'type' => 'PPPoE Username',
-                    'value' => $username,
-                    'profile' => $secret['profile'] ?? 'N/A',
-                    'service' => $secret['service'] ?? 'N/A',
-                    'disabled' => ($secret['disabled'] ?? 'false') == 'true' ? 'Yes' : 'No'
-                ];
-            }
-        }
-        
-        // Search in hotspot users
-        $hotspotUsers = $API->comm("/ip/hotspot/user/print");
-        
-        foreach ($hotspotUsers as $huser) {
-            $username = trim($huser['name'] ?? '');
-            
-            if (empty($username)) continue;
-            
-            // Check if query matches hotspot username
-            if (strtolower($username) === strtolower($query)) {
-                $results[] = [
-                    'type' => 'Hotspot User',
-                    'value' => $username,
-                    'profile' => $huser['profile'] ?? 'N/A',
-                    'server' => $huser['server'] ?? 'N/A',
-                    'disabled' => ($huser['disabled'] ?? 'false') == 'true' ? 'Yes' : 'No'
-                ];
-            }
-        }
-        
-        // Search by phone number - check against comments or custom fields
-        // Try to find from database if available
-        if (function_exists('getDBConnection')) {
-            try {
-                $db = getDBConnection();
-                if ($db) {
-                    // Search in billing customers
-                    $stmt = $db->prepare("SELECT * FROM billing_customers WHERE phone LIKE :query OR username LIKE :query LIMIT 10");
-                    $queryParam = '%' . $query . '%';
-                    $stmt->execute([':query' => $queryParam]);
-                    
-                    while ($customer = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                        $results[] = [
-                            'type' => 'Billing Customer',
-                            'phone' => $customer['phone'] ?? 'N/A',
-                            'username' => $customer['username'] ?? 'N/A',
-                            'status' => $customer['status'] ?? 'N/A',
-                            'service_type' => $customer['service_type'] ?? 'N/A'
-                        ];
-                    }
-                }
-            } catch (Exception $e) {
-                error_log("Error searching database: " . $e->getMessage());
-            }
-        }
-        
-        $API->disconnect();
-        
-        // Display results
-        if (empty($results)) {
-            sendWhatsAppMessage($phone, "❌ *TIDAK DITEMUKAN*\n\nTidak ada hasil untuk: `{$query}`\n\nSilakan periksa kembali nomor atau username Anda.");
-            return;
-        }
-        
-        $resultMsg = "🔍 *HASIL PENCARIAN: {$query}*\n\n";
-        $resultMsg .= "━━━━━━━━━━━━━━━━━━━━\n\n";
-        
-        $count = 0;
-        foreach ($results as $result) {
-            $count++;
-            if ($count > 10) {
-                $resultMsg .= "\n... dan " . (count($results) - 10) . " hasil lainnya";
-                break;
-            }
-            
-            $resultMsg .= "📋 *Hasil #" . $count . "*\n";
-            $resultMsg .= "Tipe: " . ($result['type'] ?? 'N/A') . "\n";
-            
-            if ($result['type'] === 'PPPoE Username') {
-                $resultMsg .= "Username: `{$result['value']}`\n";
-                $resultMsg .= "Profile: {$result['profile']}\n";
-                $resultMsg .= "Status: " . ($result['disabled'] === 'Yes' ? '❌ Disabled' : '✅ Active') . "\n";
-            } elseif ($result['type'] === 'Hotspot User') {
-                $resultMsg .= "Username: `{$result['value']}`\n";
-                $resultMsg .= "Profile: {$result['profile']}\n";
-                $resultMsg .= "Status: " . ($result['disabled'] === 'Yes' ? '❌ Disabled' : '✅ Active') . "\n";
-            } elseif ($result['type'] === 'Billing Customer') {
-                $resultMsg .= "Username: `{$result['username']}`\n";
-                $resultMsg .= "Phone: {$result['phone']}\n";
-                $resultMsg .= "Status: {$result['status']}\n";
-                $resultMsg .= "Service: {$result['service_type']}\n";
-            }
-            
-            $resultMsg .= "\n";
-        }
-        
-        $resultMsg .= "━━━━━━━━━━━━━━━━━━━━\n\n";
-        $resultMsg .= "💡 *Catatan:*\n";
-        $resultMsg .= "Untuk mengubah WiFi, gunakan username sebagai DEVICE_ID:\n";
-        $resultMsg .= "GANTIWIFI <username> SSID_BARU\n";
-        $resultMsg .= "GANTISANDI <username> PASSWORD_BARU\n\n";
-        $resultMsg .= "Atau hubungi admin untuk mendapatkan Device ID GenieACS.";
-        
-        sendWhatsAppMessage($phone, $resultMsg);
-        
-        // Log transaction
-        logWhatsAppTransaction($phone, $query, 'FOUND', json_encode(['results_count' => count($results)]));
-        
-    } catch (Exception $e) {
-        error_log("Find device error: " . $e->getMessage());
-        sendWhatsAppMessage($phone, "❌ *ERROR PENCARIAN*\n\n" . $e->getMessage());
-    }
-}
-
-/**
- * Change WiFi SSID via GenieACS API (atau gunakan username jika ada mapping)
- */
-function changeWiFiSSID($phone, $deviceId, $newSSID) {
-    // Validate SSID
-    if (strlen($newSSID) < 3 || strlen($newSSID) > 32) {
-        sendWhatsAppMessage($phone, "❌ *SSID TIDAK VALID*\n\nSSID harus 3-32 karakter.\nSSID Anda: {$newSSID} (" . strlen($newSSID) . " karakter)");
-        return;
-    }
-    
-    // Remove special characters that might break the request
-    if (preg_match('/[<>&"\'`]/', $newSSID)) {
-        sendWhatsAppMessage($phone, "❌ *SSID TIDAK VALID*\n\nSSID tidak boleh mengandung karakter spesial: < > & \" ' `");
-        return;
-    }
-    
-    try {
-        // Try using GenieACS API functions (same as web interface)
-        if (function_exists('genieacs_create_task')) {
-            // Use existing GenieACS function that's already tested
-            $task = [
-                "name" => "setParameterValues",
-                "parameterValues" => [
-                    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID', $newSSID, 'xsd:string']
-                ]
-            ];
-            
-            $result = genieacs_create_task($deviceId, $task, true); // true = connection_request to trigger device connect
-            
-            if (isset($result['error'])) {
-                error_log("WiFi SSID change error (API function): " . $result['error']);
-                sendWhatsAppMessage($phone, "❌ *GAGAL UBAH SSID*\n\nError: " . $result['error']);
-                return;
-            }
-            
-            // Success
-            $successMsg = "✅ *SSID BERHASIL DIUBAH*\n\n";
-            $successMsg .= "━━━━━━━━━━━━━━━━━━━━\n\n";
-            $successMsg .= "📱 Device ID: {$deviceId}\n";
-            $successMsg .= "📡 SSID Baru: *{$newSSID}*\n\n";
-            $successMsg .= "⏳ Perubahan akan diproses dalam beberapa detik.\n";
-            $successMsg .= "Perangkat akan boot ulang otomatis.";
-            
-            sendWhatsAppMessage($phone, $successMsg);
-            
-            // Log transaction
-            logWhatsAppTransaction($phone, $deviceId, 'SUCCESS', json_encode(['action' => 'change_ssid', 'device_id' => $deviceId, 'new_ssid' => $newSSID]));
-            return;
-        }
-    } catch (Exception $e) {
-        error_log("WiFi SSID change (API function) exception: " . $e->getMessage());
-        // Fall through to curl method if function doesn't exist
-    }
-    
-    // Fallback: Use direct CURL method (if genieacs_create_task not available)
-    try {
-        // Call GenieACS API via curl (same pattern as save_wifi.php)
-        // Use the endpoint: /devices/{device_id}/tasks?connection_request
-        $genieacs_base = 'http://192.168.8.89:7557/api';
-        $genieacs_url = $genieacs_base . '/devices/' . urlencode($deviceId) . '/tasks?connection_request';
-        
-        // Create task payload
-        $task_payload = [
-            'name' => 'setParameterValues',
-            'parameterValues' => [
-                ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID', $newSSID, 'xsd:string']
-            ]
-        ];
-        
-        // Initialize curl with proper timeout
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $genieacs_url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($task_payload));
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        
-        // Execute request
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curl_error = curl_error($ch);
-        curl_close($ch);
-        
-        // Check for curl errors
-        if (!empty($curl_error)) {
-            error_log("WiFi SSID change curl error: {$curl_error} (Device: {$deviceId})");
-            sendWhatsAppMessage($phone, "⚠️ *PROSES LAMBAT*\n\nGenieACS membutuhkan waktu lebih lama.\n\n🔄 Perintah sedang diproses di server.\nMohon tunggu beberapa saat dan cek status device.\n\nDevice ID: {$deviceId}");
-            return;
-        }
-        
-        // Check response - accept 200, 201, 202
-        if ($http_code !== 200 && $http_code !== 201 && $http_code !== 202) {
-            error_log("WiFi SSID change error: HTTP {$http_code}, Response: {$response} (Device: {$deviceId})");
-            sendWhatsAppMessage($phone, "⚠️ *STATUS TIDAK PASTI*\n\nServer merespons kode: {$http_code}\n\nPerubahan mungkin sedang diproses.\n\nDevice ID: {$deviceId}\nSSID Baru: {$newSSID}\n\n⏳ Tunggu 10-15 detik dan cek status device.");
-            return;
-        }
-        
-        // Success response
-        $successMsg = "✅ *SSID BERHASIL DIUBAH*\n\n";
-        $successMsg .= "━━━━━━━━━━━━━━━━━━━━\n\n";
-        $successMsg .= "📱 Device ID: {$deviceId}\n";
-        $successMsg .= "📡 SSID Baru: *{$newSSID}*\n\n";
-        $successMsg .= "⏳ Perubahan akan diproses dalam beberapa detik.\n";
-        $successMsg .= "Perangkat akan boot ulang otomatis.";
-        
-        sendWhatsAppMessage($phone, $successMsg);
-        
-        // Log transaction
-        logWhatsAppTransaction($phone, $deviceId, 'SUCCESS', json_encode(['action' => 'change_ssid', 'device_id' => $deviceId, 'new_ssid' => $newSSID]));
-        
-    } catch (Exception $e) {
-        error_log("WiFi SSID change exception: " . $e->getMessage());
-        sendWhatsAppMessage($phone, "❌ *ERROR MENGUBAH SSID*\n\n" . $e->getMessage());
-    }
-}
-
-/**
- * Change WiFi Password via GenieACS API
- */
-function changeWiFiPassword($phone, $deviceId, $newPassword) {
-    // Validate password
-    if (strlen($newPassword) < 8 || strlen($newPassword) > 32) {
-        sendWhatsAppMessage($phone, "❌ *PASSWORD TIDAK VALID*\n\nPassword harus 8-32 karakter.\nPassword Anda: " . str_repeat('*', strlen($newPassword)) . " (" . strlen($newPassword) . " karakter)");
-        return;
-    }
-    
-    // Remove special characters that might break the request
-    if (preg_match('/[<>&"\'`]/', $newPassword)) {
-        sendWhatsAppMessage($phone, "❌ *PASSWORD TIDAK VALID*\n\nPassword tidak boleh mengandung karakter spesial: < > & \" ' `");
-        return;
-    }
-    
-    try {
-        // Try using GenieACS API functions (same as web interface)
-        if (function_exists('genieacs_create_task')) {
-            // Use existing GenieACS function that's already tested
-            $task = [
-                "name" => "setParameterValues",
-                "parameterValues" => [
-                    // Huawei, ZTE, FiberHome format
-                    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase', $newPassword, 'xsd:string'],
-                    // Alternate format for some manufacturers
-                    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase', $newPassword, 'xsd:string']
-                ]
-            ];
-            
-            $result = genieacs_create_task($deviceId, $task, true); // true = connection_request to trigger device connect
-            
-            if (isset($result['error'])) {
-                error_log("WiFi password change error (API function): " . $result['error']);
-                sendWhatsAppMessage($phone, "❌ *GAGAL UBAH PASSWORD*\n\nError: " . $result['error']);
-                return;
-            }
-            
-            // Success
-            $successMsg = "✅ *PASSWORD BERHASIL DIUBAH*\n\n";
-            $successMsg .= "━━━━━━━━━━━━━━━━━━━━\n\n";
-            $successMsg .= "📱 Device ID: {$deviceId}\n";
-            $successMsg .= "🔐 Password Baru: " . str_repeat('*', strlen($newPassword)) . "\n\n";
-            $successMsg .= "⏳ Perubahan akan diproses dalam beberapa detik.\n";
-            $successMsg .= "Perangkat akan boot ulang otomatis.";
-            
-            sendWhatsAppMessage($phone, $successMsg);
-            
-            // Log transaction
-            logWhatsAppTransaction($phone, $deviceId, 'SUCCESS', json_encode(['action' => 'change_password', 'device_id' => $deviceId]));
-            return;
-        }
-    } catch (Exception $e) {
-        error_log("WiFi password change (API function) exception: " . $e->getMessage());
-        // Fall through to curl method if function doesn't exist
-    }
-    
-    // Fallback: Use direct CURL method (if genieacs_create_task not available)
-    try {
-        // Call GenieACS API via curl
-        $genieacs_base = 'http://192.168.8.89:7557/api';
-        $genieacs_url = $genieacs_base . '/devices/' . urlencode($deviceId) . '/tasks?connection_request';
-        
-        // Create task payload - try multiple password paths for different ONU brands
-        $task_payload = [
-            'name' => 'setParameterValues',
-            'parameterValues' => [
-                // Huawei, ZTE, FiberHome format
-                ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase', $newPassword, 'xsd:string'],
-                // Alternate format for some manufacturers
-                ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase', $newPassword, 'xsd:string']
-            ]
-        ];
-        
-        // Initialize curl with longer timeout (30 seconds for GenieACS processing)
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $genieacs_url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($task_payload));
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);  // Increased from 10 to 30 seconds
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);  // Connection timeout
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        
-        // Execute request
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curl_error = curl_error($ch);
-        curl_close($ch);
-        
-        // Check for curl errors
-        if (!empty($curl_error)) {
-            // Try to provide more specific error info
-            if (strpos($curl_error, 'timed out') !== false) {
-                sendWhatsAppMessage($phone, "⚠️ *PROSES LAMBAT*\n\nGenieACS membutuhkan waktu lebih lama.\n\n🔄 Perintah sedang diproses di server.\nMohon tunggu beberapa saat dan cek status device.\n\nDevice ID: {$deviceId}");
-            } else {
-                sendWhatsAppMessage($phone, "❌ *GAGAL UBAH PASSWORD*\n\nKoneksi ke GenieACS failed:\n{$curl_error}");
-            }
-            error_log("WiFi password change curl error: {$curl_error} (Device: {$deviceId})");
-            return;
-        }
-        
-        // Check response - accept 200, 201, 202
-        if ($http_code !== 200 && $http_code !== 201 && $http_code !== 202) {
-            error_log("WiFi password change error: HTTP {$http_code}, Response: {$response} (Device: {$deviceId})");
-            sendWhatsAppMessage($phone, "⚠️ *STATUS TIDAK PASTI*\n\nServer merespons kode: {$http_code}\n\nPerubahan mungkin sedang diproses.\n\nDevice ID: {$deviceId}\n\n⏳ Tunggu 10-15 detik dan cek status device.");
-            return;
-        }
-        
-        // Success response
-        $successMsg = "✅ *PASSWORD BERHASIL DIUBAH*\n\n";
-        $successMsg .= "━━━━━━━━━━━━━━━━━━━━\n\n";
-        $successMsg .= "📱 Device ID: {$deviceId}\n";
-        $successMsg .= "🔐 Password Baru: " . str_repeat('*', strlen($newPassword)) . "\n\n";
-        $successMsg .= "⏳ Perubahan akan diproses dalam beberapa detik.\n";
-        $successMsg .= "Perangkat akan boot ulang otomatis.";
-        
-        sendWhatsAppMessage($phone, $successMsg);
-        
-        // Log transaction
-        logWhatsAppTransaction($phone, $deviceId, 'SUCCESS', json_encode(['action' => 'change_password', 'device_id' => $deviceId]));
-        
-    } catch (Exception $e) {
-        error_log("WiFi password change exception: " . $e->getMessage());
-        sendWhatsAppMessage($phone, "❌ *ERROR MENGUBAH PASSWORD*\n\n" . $e->getMessage());
-    }
-}
-
 // Return success response
 http_response_code(200);
 echo json_encode(['status' => 'success', 'message' => 'Webhook processed']);
-
