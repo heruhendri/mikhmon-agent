@@ -23,6 +23,34 @@ chmod +x install-mikhmon-agent.sh
 Kalau ingin saya upload ke repo-mu sekalian, bilang saja.
 
 ---
+### Konfigurasi Setelah Selesai Install
+
+1. **Masuk Folder**
+   ```bash
+   cd /var/www/namafolder
+   ```
+
+2. **Buat Database **
+   ```sql
+   buat database name dan usernya di hosting
+   ```
+3. **Konfigurasi Database**
+   Edit file `include/db_config.php`:
+    ```bash
+    include/db_config.php
+    ```
+4. **Sesuaikan Dengan DB Anda**
+   ```php
+   define('DB_HOST', 'localhost');
+   define('DB_USER', 'your_db_user');
+   define('DB_PASS', 'your_db_password');
+   define('DB_NAME', 'mikhmon_agents');
+   ```
+
+5. **Run autentekasi DB**
+   Akses `http://your-domain/fix_all_modules.php?key=fix-all-2024
+
+### Konfigurasi Tambahan
 
 # 🎯 **ISI SCRIPT (FULL + FIXED & TESTED)**
 
@@ -30,6 +58,7 @@ Berikut full script yang sudah bersih & tanpa error:
 
 ---
 
+```bash
 #!/bin/bash
 
 echo "==============================================="
@@ -121,6 +150,9 @@ rm -f "$SCRIPT_NAME"
 
 echo "Installer telah dihapus!"
 
+```
+
+---
 
 # 🧪 **FITUR DI DALAM SCRIPT**
 
