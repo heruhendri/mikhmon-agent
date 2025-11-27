@@ -1,7 +1,7 @@
 <?php 
 if(substr($_SERVER["REQUEST_URI"], -10) == "config.php"){header("Location:./");}; 
-$data['mikhmon'] = array ('1'=>'mikhmon<|<alijaya','mikhmon>|>aGdiaWJj');
+$data['mikhmon'] = array ('1'=>'mikhmon<|<mikhmon','mikhmon>|>aWNlbA==');
 
-$data['ALIJAYA-NET'] = array ('1'=>'ALIJAYA-NET!192.168.8.1:8700','ALIJAYA-NET@|@alijaya','ALIJAYA-NET#|#aGdiaWJj','ALIJAYA-NET%ALIJAYA-NET','ALIJAYA-NET^alijayanet.login','ALIJAYA-NET&Rp','ALIJAYA-NET*10','ALIJAYA-NET(1','ALIJAYA-NET)','ALIJAYA-NET=10','ALIJAYA-NET@!@enable');
+$data['fiberku.net'] = array ('1'=>'fiberku.net!192.168.1.1','fiberku.net@|@ultraman','fiberku.net#|#hihihihi','fiberku.net%fiberku.net','fiberku.net^fiberku.net','fiberku.net&Rp','fiberku.net*10','fiberku.net(1','fiberku.net)','fiberku.net=10','fiberku.net@!@enable');
 
 
