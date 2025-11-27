@@ -30,7 +30,6 @@ Berikut full script yang sudah bersih & tanpa error:
 
 ---
 
-```bash
 #!/bin/bash
 
 echo "==============================================="
@@ -112,9 +111,16 @@ echo "==============================================="
 echo "Akses: http://$DOMAIN"
 echo "Folder: $INSTALL_DIR"
 echo "==============================================="
-```
+echo ""
 
----
+# ----------- HAPUS FILE INSTALLER ----------
+SCRIPT_NAME=$(basename "$0")
+
+echo "Menghapus file installer: $SCRIPT_NAME"
+rm -f "$SCRIPT_NAME"
+
+echo "Installer telah dihapus!"
+
 
 # 🧪 **FITUR DI DALAM SCRIPT**
 
