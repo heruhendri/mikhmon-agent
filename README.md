@@ -37,7 +37,7 @@ Kalau ingin saya upload ke repo-mu sekalian, bilang saja.
 3. **Konfigurasi Database**
    Edit file `include/db_config.php`:
     ```bash
-    include/db_config.php
+    nano include/db_config.php
     ```
 4. **Sesuaikan Dengan DB Anda**
    ```php
