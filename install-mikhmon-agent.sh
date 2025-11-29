@@ -21,7 +21,7 @@ sleep 1
 apt update && apt upgrade -y
 
 # ----------- INSTALL DEPENDENCIES ----------
-apt install -y nginx php php-fpm php-cli php-curl php-xml php-zip php-mbstring php-gd git unzip curl
+apt install -y nginx sudo nano php php-fpm php-cli php-curl php-xml php-zip php-mbstring php-gd git unzip curl
 
 # ----------- CLONE REPO --------------------
 mkdir -p $INSTALL_DIR
